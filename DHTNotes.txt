@@ -1,0 +1,73 @@
+DHTNotes
+
+*** LOOK FOR PYTHON DHT IMPLEMANTUON *** - http://download.bittorrent.com/dl/archive/
+
+Routing table key = (ID, PORT, IP )
+
+Sub Second DHT Lookups - Good paper on optimizations (MultiMillion Node)
+Paper recommends adding RTT - Round Trip Time
+	Also making find nodes queries to a Node ID in buckets that havent been queried in a while
+	Or just every six seconds just ping the last talked to node
+	Quarantine Bucket - Before acutally using a new ID you put it in a bucket, wait 3 min, the re ping 
+		to verify its not just coming and going
+
+Arvid Periodically switches peer_id to hear about a different part of the DHT
+
+You keep a second unlimitied bucket for each bucket
+
+When a bucket fills up or just if a query fails you goto your second bucket and grab
+one from there to replace ur main bucket.
+
+
+Constants:
+  k = bucket size. Utorrent is 8
+  alpha = number of open connections
+
+  Queries:
+
+
+Ping - When you check if someones around - refresh your routing table - if you hear about someone
+		indirectly.
+
+Find Node - Bootstrapping and maintenance. 
+		You search for yourself when starting out to find nodes near your own ID.
+		They will respond with all nodes in my same bucket.
+
+		Original Paper, every 15 min you refresh buckets by doing a find node in them.
+
+
+I Recieve a get_peers :
+	I need to check my dict of info hashes -> peer list
+
+I receive an annouce peer:
+	I add the peer to my info hashes 
+
+
+Token is typically a sha1(ip + port + secret_key) - Verifies that whoever sent this didnt spoof ip prt
+
+I need to use get peers to annouce so that I can find the IP PORT with the id that is near the info hash I have to annouce.
+
+Every response from get_peers is put in list ordered by xor dist from their node id to info hash.
+
+Im going to send a get_peers to closest 3 in the closest bucket. Then take their response, order it by xor dist, and keep get_peersing them. Eveytime I get a get_peers response for any specific info_hash put it in the same list and sort it.
+
+Stop querying when all quereis sent for an info hash are returned and you have queried the top K people in your sorted list of get_peers reponses.
+
+When done you take these top 8 that are in the sorted list and annouce to them.
+
+Regardless of whether or not someone wants to download somethingor uplaod you do the get_peers annouce_peer dance.
+
+You just need to find people with a peer list for your info hash which are most likely people iwth similar IDs
+
+Extensions:
+
+
+Add filename to announce - Does filename or filename
+	Arvid downloaded torrentfile
+
+
+
+Torrent Mag UTMetadata Extension is how I get a torrent file for an ID Hash
+
+
+LibTorrent and python bindings

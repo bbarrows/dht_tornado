@@ -6,7 +6,7 @@ import hashlib, socket, array, time
 from struct import *
 import sys, re, random, thread, threading, os, re
 from cStringIO import StringIO
-
+from ordereddict import OrderedDict
 from bintrees import BinaryTree
 
 from tornado import ioloop
@@ -30,14 +30,163 @@ def gen_random_string_of_bytes(length):
 ip_ports = [('180.35.205.227', 31559), ('99.248.254.29', 41959), ('94.225.104.219', 53154), ('188.168.217.194', 30455), ('71.225.73.243', 15804), ('46.98.7.219', 50586), ('79.116.40.153', 30832), ('109.193.5.98', 34776), ('178.48.61.57', 45204), ('93.120.198.189', 19794), ('2.9.25.254', 42445), ('93.84.102.26', 48523), ('84.29.0.136', 49858), ('91.122.102.181', 56763), ('175.180.182.202', 11625), ('46.129.17.241', 37756)]
 
 class DHTNode(object):
-    def __init__(self, ip_port, id):
-        self.id = id
-        self.queries = {}
-        self.ip_port = ip_port
+    __slots__ = ['key', 'value', 'left', 'right']
+    def __init__(self, key, value):
+        self.key = key
+        self.value = value
+        self.left = None
+        self.right = None
+
+    def __sstr__(self):
+        """Recursive __str__ method of an isomorphic node."""
+        s = "  0\n"
+        if self.left:
+            s += "    l" + str(self.left)
+
+        if self.right:
+            s += "    r" + str(self.right)
+
+        return s
+        # Keep a list of lines
+        lines = list()
+        lines.append("0")#str(self.value))
+        # Get left and right sub-trees
+        l = str(self.left).split('\n')
+        r = str(self.right).split('\n')
+        #return '\n'.join(l) 
+
+        #print l #alt = '| '
+        #for line in l:
+        #    lines.append(alt + line)
+
+        #alt = '  '
+        #for line in r:
+        #    lines.append(alt + line)
+
+        # Append first left, then right trees
+        for branch in l, r:
+            #lines.append("1")
+            # Suppress Pipe on right branch
+            alt = '| ' if branch is l else '  '
+            lines.append(alt)
+            for line in branch:
+                # Special prefix for first line (child)
+                prefix = alt #'+-' if line is branch[0] else alt
+                lines.append(prefix + line)
+        # Collapse lines
+        return '\n'.join(lines)    
+
+    def __repr__(self):
+        ret_str = ""
+        if self.value:
+            ret_str += "V(%s)  " % self.value
+
+        #if self.left:
+        ret_str += "L(%s)  " % self.left
+
+        #if self.right:
+        ret_str += "R(%s)" % self.right
+        
+        return ret_str
+        #return "V(%s)   L(%s) R(%s)" % (self.value, self.left, self.right)
+
+    def __getitem__(self, key):
+        """ x.__getitem__(key) <==> x[key], where key is 0 (left) or 1 (right) """
+        return self.left if key == 0 else self.right
+
+    def __setitem__(self, key, value):
+        """ x.__setitem__(key, value) <==> x[key]=value, where key is 0 (left) or 1 (right) """
+        if key == 0:
+            self.left = value
+        else:
+            self.right = value
+
+    def free(self):
+        """ Set references to None """
+        self.left = None
+        self.right = None
+        self.value = None
+        self.key = None
+
+class DHTTree(object):
+    MAX_LIST_LENGTH = 2
+    def __init__(self, peer_id):
+        self._root = DHTNode(None, None)
+        self._add_branches_to_node(self._root)
+
+        self.peer_id = peer_id
+        self.bitmask = 1 << (20 * 8 - 1)    
+
+    def _add_branches_to_node(self, node):
+        node.left  = DHTNode(0, [])
+        node.right = DHTNode(1, [])
+
+
+    #Response for find_node, iterate down the tree
+    #as far as possible to get a bucket to retunr
+    def get_closest_node_bucket(self, key):
+        pass
+
+    def insert(self, key):
+        bitmask = 1 << 7
+        cur_char_index = 0
+        cur_key_char = ord(key[cur_char_index])
+        cur_peer_char = ord(self.peer_id[cur_char_index])
+
+        cur_node = self._root
+        same_branch = True
+
+        while cur_node != None:
+            next_bit = cur_key_char & bitmask
+
+            if same_branch:
+                same_branch = not( (cur_peer_char & bitmask) ^ next_bit)
+
+            if next_bit:
+                cur_node = cur_node.right
+            else:
+                cur_node = cur_node.left
+
+            if cur_node and cur_node.value != None:
+                if len(cur_node.value) >= DHTTree.MAX_LIST_LENGTH:
+                    #import pdb; pdb.set_trace()
+                    if same_branch:
+                        nodes_to_re_add = cur_node.value
+                        cur_node.value = None
+                        self._add_branches_to_node(cur_node)
+                        for n in nodes_to_re_add:
+                            print "Readding %s" % n
+                            self.insert(n)
+                        self.insert(key)
+                        print "Done"
+                        break
+                    else:
+                        for n in cur_node.value:
+                            print "Checking %s" % n
+                        print "Before:%s" % str(cur_node.value)
+                        cur_node.value[DHTTree.MAX_LIST_LENGTH - 1] = key
+                        print "After:%s" % str(cur_node.value)
+                        break
+                        pass #Check if last node is still valid, if not kcik off and add this one  
+                else:
+                    if key not in cur_node.value:
+                        cur_node.value.append(key)  
+                        break
+
+                                 
+            bitmask = bitmask >> 1
+            if not bitmask:
+                bitmask = 1 << 7
+                cur_char_index = cur_char_index + 1
+                cur_key_char = ord(key[cur_char_index])
+                cur_peer_char = ord(self.peer_id[cur_char_index])
+            #cur_node = next_node
+
 
 
 class DHT(object):
     def __init__(self, port, bootstrap_ip_ports, node_id = None, io_loop = None):
+        self.transaction_id = 0
         self.ip_ports = bootstrap_ip_ports
 
         self.routing_table = BinaryTree()
@@ -51,7 +200,15 @@ class DHT(object):
         self.port = port
         self.io_loop = io_loop or ioloop.IOLoop.instance()
 
-        self.querying_nodes = {}
+        self.queries = {}
+
+    def get_trasaction_id(self):
+        self.transaction_id += 1
+
+        if self.transaction_id >= 65534:
+            self.transaction_id = 0
+        
+        return pack("H", self.transaction_id)
 
         #http://www.bittorrent.org/beps/bep_0005.html
 
@@ -59,9 +216,9 @@ class DHT(object):
         #ping Query = {"t":"aa", "y":"q", "q":"ping", "a":{"id":"abcdefghij0123456789"}}
         #Response = {"t":"aa", "y":"r", "r": {"id":"mnopqrstuvwxyz123456"}}
 
-    def got_ping_response(responder, original_query, bdict):
+    def got_ping_response(self, original_query, response):
         #add responder.id to my RoutingTable
-        print "Got a response from %s" % responder.id
+        print "Got a response from %s" % response["r"]["id"]
         pass
 
         #find_node
@@ -77,27 +234,41 @@ class DHT(object):
         #announce_peers Query = {"t":"aa", "y":"q", "q":"announce_peer", "a": {"id":"abcdefghij0123456789", "info_hash":"mnopqrstuvwxyz123456", "port": 6881, "token": "aoeusnth"}}
         #Response = {"t":"aa", "y":"r", "r": {"id":"mnopqrstuvwxyz123456"}}
 
-    def handle_response(self, bdict):
-        responder_id = bdict["r"]["id"]
+    def handle_response(self, response):
+        responder_id = response["r"]["id"]
+        t_id = response["t"]
+
+        if not self.queries.has_key(t_id):
+            print "I dont have a transaction ID that matches this response"
+        elif self.queries[t_id]["q"] == "ping":
+            self.got_ping_response(self.queries[t_id], response)
+        elif self.queries[t_id]["q"] == "find_node":
+            pass#self.got_find_node_response(responder, original_query, response)
+        elif self.queries[t_id]["q"] == "get_peers":
+            pass#self.got_get_peers_response(responder, original_query, response)
+        elif self.queries[t_id]["q"] == "announce_peer":
+            pass#self.got_announce_peer_response(responder, original_query, response)
+
+        return 
+
         if self.querying_nodes.has_key(responder_id):
             responder = self.querying_nodes[responder_id]
             trans_id = bdict["t"]
             if responder.queries.has_key(trans_id):
                 original_query = responder.queries[trans_id]
                 if original_query["q"] == "ping":
-                    self.got_ping_response(responder, original_query, bdict)
+                    self.got_ping_response(responder, original_query, response)
                 elif original_query["q"] == "find_node":
-                    pass#self.got_find_node_response(responder, original_query, bdict)
+                    pass#self.got_find_node_response(responder, original_query, response)
                 elif original_query["q"] == "get_peers":
-                    pass#self.got_get_peers_response(responder, original_query, bdict)
+                    pass#self.got_get_peers_response(responder, original_query, response)
                 elif original_query["q"] == "announce_peer":
-                    pass#self.got_announce_peer_response(responder, original_query, bdict)
+                    pass#self.got_announce_peer_response(responder, original_query, response)
             else:
                 print "I havent asked them about this before"
         else:
             print "It doesnt seem like I have asked this node anything before"
 
-        pass
 
     def handle_query(self, bdict):
         pass
@@ -124,13 +295,14 @@ class DHT(object):
 
     #XXX: This could block on sock.sendto, maybe do non blocking
     def start(self):
-        ping_msg = bencode({"t":"a1", "y":"q", "q":"ping", "a":{"id": self.id }})
-
         for ip_port in self.ip_ports:
             print "----%s--->\n" % str(ip_port)
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.io_loop.add_handler(sock.fileno(), partial(self.handle_input, sock, ip_port), self.io_loop.READ)
-            sock.sendto(ping_msg, ip_port)
+            t_id = self.get_trasaction_id()
+            ping_msg = {"t": t_id, "y": "q", "q": "ping", "a": {"id": self.id }}
+            sock.sendto(bencode(ping_msg), ip_port)
+            self.queries[t_id] = ping_msg
 
         self.io_loop.start() 
         #distance(A,B) = |A xor B| Smaller values are closer.
