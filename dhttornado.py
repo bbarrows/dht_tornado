@@ -11,11 +11,14 @@ from heapq import heappush, heappop, nsmallest
 from tornado import ioloop
 from tornado import iostream
 
+#Project TODO:
+#Responding to queries
+#Testing that result peers work 
+
+
 #This is just an array from the bootrstrap (bht) project I have
 #That I am using for testing right now
-ip_ports = [('126.129.176.163', 58481), ('98.15.176.247', 34555), ('90.18.108.27', 14397), ('95.68.75.111', 37414), ('94.41.45.13', 31254), ('92.247.248.56', 21723), ('176.63.240.31', 43759), ('89.164.204.238', 33564), ('173.78.146.149', 18138), ('77.244.239.22', 57256), ('182.169.180.38', 60252), ('109.86.179.69', 29658), ('81.162.18.3', 36288), ('78.30.235.212', 10803), ('178.35.237.17', 19695), ('109.129.94.242', 47588), ('95.55.144.6', 46686), ('94.66.254.214', 64551), ('188.82.29.34', 18199), ('68.84.45.204', 38435), ('86.68.106.234', 54445),
-('98.245.82.215', 27114), ('68.175.40.234', 32126), ('24.109.43.211', 49091), ('66.36.140.57', 31375), ('95.178.171.53', 45682), ('83.134.131.66', 45682), ('174.50.130.27', 41509), ('24.89.206.102', 29463), ('67.177.10.117', 12380), ('91.152.72.163', 44910), ('99.243.110.219', 14110), ('67.183.236.43', 46583), ('96.30.130.32', 28101)
-]
+ip_ports = [('58.7.64.238', 61727), ('74.124.166.134', 8999), ('194.8.156.176', 36596), ('59.167.94.10', 37120), ('50.71.135.22', 49523), ('86.1.221.110', 38670), ('23.17.73.219', 36094), ('70.79.118.134', 49045)]
 
 
 #This just returns a random number between 0 and MAX 32 Bit Int
@@ -96,12 +99,13 @@ class DHTPeer(object):
 
 
 class DHTBucket(object):
-    __slots__ = ['key', 'value', 'left', 'right']
+    #__slots__ = ['key', 'value', 'left', 'right', 'last_time_validity_checked']
     def __init__(self, key, value):
         self.key = key
         self.value = value
         self.left = None
         self.right = None
+        self.last_time_validity_checked = 0 #time.time()
 
     def __str__(self):
         return self.__repr__()
@@ -128,6 +132,15 @@ class DHTBucket(object):
         else:
             self.right = value
 
+    def remove_by_attribute(self, attr, value):
+        for n in self.value:
+            if getattr(n, attr, '') == value:
+                self.value.remove(n)
+                break
+
+    def is_full(self):
+        return len(self.value) > DHTTree.MAX_LIST_LENGTH
+
     def free(self):
         self.left = None
         self.right = None
@@ -138,6 +151,7 @@ class DHTBucket(object):
 
 class DHTTree(object):
     MAX_LIST_LENGTH = 8
+    BUCKET_UPDATE_TIME = 5
     def __init__(self, dht):
         self._root = DHTBucket(None, None)
         self._add_branches_to_node(self._root)
@@ -180,7 +194,7 @@ class DHTTree(object):
                 return cur_node.value
             else:   
                 that_side = search_tree(key, next_node)
-                if that_side and len(that_side) < DHTTree.MAX_LIST_LENGTH:
+                if that_side and len(that_side) < DHTTree.MAX_LIST_LENGTH:  #XXX: Could make thius bigger as an optimazaiotn
                     other_side_of_tree = cur_node[b ^ 1]
                     return that_side + search_tree(key, other_side_of_tree)
                 else:
@@ -188,17 +202,32 @@ class DHTTree(object):
 
         return search_tree(key, self._root)
 
-    def find_non_responsive_node(self, current_list, new_node):
-        def check_transactions(ping_transactions, new_node, current_list):
+    #Set a timeout that this bucket was last checked
+    #If the time has passed then check the buket again
+    #When checking the bucket ping all nodes and remember transaction IDS
+    #A few seconds later go and make sure all those pongs came back via the
+    #transaction IDS
+    def find_non_responsive_node(self, cur_node, new_node):
+        if time.time() < cur_node.last_time_validity_checked + DHTTree.BUCKET_UPDATE_TIME:
+            #print "\n\n\t~~~~~~I already updated this dont do it again for a while\n\n"
+            return   #I updated this bucket a few seconds ago. Dont bother those peers again
+        cur_node.last_time_validity_checked = time.time()
+
+        def check_transactions(ping_transactions, new_node, cur_node):
             for count, transaction_id in enumerate(ping_transactions):
                 if self.dht.queries.has_key(transaction_id):
-                    current_list[count] = new_node
+                    node_to_remove_ip_port = self.dht.queries[transaction_id].ip_port
+                    #print "Removing %s" % len(cur_node.value)
+                    cur_node.remove_by_attribute("ip_port", node_to_remove_ip_port)
+                    #print "Removing %s" % len(cur_node.value)
+                if not cur_node.is_full():
+                    cur_node.value.append(new_node)
 
         ping_transactions = []
-        for n in current_list:
+        for n in cur_node.value:
             ping_transactions.append(self.dht.ping(n.ip_port))
 
-        self.dht.io_loop.add_timeout(time.time() + DHT.PONG_TIMEOUT, partial(check_transactions, ping_transactions, new_node, current_list))
+        self.dht.io_loop.add_timeout(time.time() + DHT.PONG_TIMEOUT, partial(check_transactions, ping_transactions, new_node, cur_node))
 
 
 
@@ -218,7 +247,7 @@ class DHTTree(object):
             cur_node = cur_node[other_next_bit]
 
             if cur_node and cur_node.value != None:
-                if len(cur_node.value) >= DHTTree.MAX_LIST_LENGTH:
+                if cur_node.is_full():
                     #import pdb; pdb.set_trace()
                     if same_branch:
                         nodes_to_re_add = cur_node.value
@@ -231,15 +260,13 @@ class DHTTree(object):
                         #print "Done"
                         break
                     else:
-                        #TODO I prob only want to ping all the nodes in a bucket every so many seconds
-                        #I should add a line that checks this is only ran eery few seconds
                         #print "Before:%s" % str(cur_node.value)
-                        self.find_non_responsive_node(cur_node.value, dht_node)
+                        self.find_non_responsive_node(cur_node, dht_node)
                         #print "After:%s" % str(cur_node.value)
                         break
                 else:
                     if dht_node not in cur_node.value:
-                        cur_node.value.append(dht_node)  
+                        cur_node.value.append(dht_node)
                         break
 
 
@@ -321,10 +348,10 @@ class DHT(object):
             self.find_node(target)
         except Exception, e:
             print str(e)
-            self.io_loop.add_timeout(time.time() + self.bootstrap_delay, self.bootstrap_by_finding_myself)
+            self.io_loop.add_timeout(time.time() + self.bootstrap_delay+ 10, self.bootstrap_by_finding_myself)
 
         #XXX: The return  is temporary
-        #return
+        return
 
 
         self.current_bootstrap_node = self.current_bootstrap_node + 1
@@ -365,6 +392,9 @@ class DHT(object):
 
         del self.queries[transaction_id]
 
+    def got_ping_response(self, query):
+        pass
+
         #~~~~~~~~~~~~~~~~ MESSAGE: find_node
         #find_node Query = {"t":"aa", "y":"q", "q":"find_node", "a": {"id":"abcdefghij0123456789", "target":"mnopqrstuvwxyz123456"}}
         #Response = {"t":"aa", "y":"r", "r": {"id":"0123456789abcdefghij", "nodes": "def456..."}}
@@ -377,6 +407,7 @@ class DHT(object):
         closest_bucket = self.routing_table.get_target_bucket(target)
 
         if not closest_bucket:
+            import pdb; pdb.set_trace()
             raise Exception("TODO: Fix get_target_bucket, make it get something. There are no nodes in the routing table to send find node messages.")
         #Iterate over and find closest N nodes
         for n in closest_bucket:
@@ -402,8 +433,12 @@ class DHT(object):
         #nodes ur gonna get. Ur down. U just found the closest nodes.
         #Not the target
 
+    def got_find_node_response(self, query):
+        pass
+
     def got_find_node_response(self, response):
         #print "Got find_node response"
+        import pdb; pdb.set_trace()
         target_id = self.get_target_id_from_response(response)
         print "<----%s--- FIND_NODES \n" % target_id
 
@@ -485,6 +520,8 @@ class DHT(object):
         self.sock.sendto(bencode(get_peers_msg), ip_port)
         self.queries[trasaction_id] = DHTQuery(get_peers_msg, ip_port)
 
+    def got_get_peers_response(self, query):
+        pass
 
     def got_get_peers_response(self, response):
         #print "Got get_peers response"
@@ -505,7 +542,9 @@ class DHT(object):
         elif response['r'].has_key('values'):
             import pdb; pdb.set_trace()
             #print "\n\n!!!!The get_peers has values!!!!\n\n"
-            self.add_peers_to_list(response, target_id)        
+            self.add_peers_to_list(response, target_id)
+            #XXX: Maybe I should announce back even if they dont have a peer list for me?
+            self.announce_peer(target_id, ip_port, response)        
         else:
             print "Response for find_node has no nodes:\n%s" % str(response)
 
@@ -531,9 +570,16 @@ class DHT(object):
         #~~~~~~~~~~~~~~~~ MESSAGE: announce_peer
         #announce_peers Query = {"t":"aa", "y":"q", "q":"announce_peer", "a": {"id":"abcdefghij0123456789", "info_hash":"mnopqrstuvwxyz123456", "port": 6881, "token": "aoeusnth"}}
         #Response = {"t":"aa", "y":"r", "r": {"id":"mnopqrstuvwxyz123456"}}
-    def announce_peer(self, info_hash, port, token):
+    def announce_peer(self, info_hash, ip_port, response):
+        token = response['r']['token']
         print "ANNOUNCE_PEER ----%s--->\n" % str(ip_port)
-        
+        t _id = self.get_trasaction_id()
+        announce_peer_msg = {"t": t_id, "y": "q", "q": "announce_peer", "a": {"id": self.id, "info_hash": info_hash, "token": token, "port": self.port}}
+        self.sock.sendto(bencode(announce_peer_msg), ip_port)
+        self.queries[t_id] = DHTQuery(announce_peer_msg, ip_port)
+
+    def got_announce_peer_response(self, query):
+        pass
 
     def got_announce_peer_response(self, response):
         target_id = self.get_target_id_from_response(response)
@@ -553,17 +599,21 @@ class DHT(object):
         if original_query["q"] == "ping":
             self.got_ping_response(response)
         elif original_query["q"] == "find_node":
-            print "~~~Got find_node Response\n"
             self.got_find_node_response(response)
         elif original_query["q"] == "get_peers":
-            print "~~~Got get_peers Response\n"
             self.got_get_peers_response(response)
         elif original_query["q"] == "announce_peer":
-            print "~~~Got announce_peer Response\n"
             self.got_announce_peer_response(response)
 
-    def handle_query(self, bdict):
-        pass
+    def handle_query(self, query):
+        if query["q"] == "ping":
+            self.got_ping_response(query)
+        elif query["q"] == "find_node":
+            self.got_find_node_response(query)
+        elif query["q"] == "get_peers":
+            self.got_get_peers_response(query)
+        elif query["q"] == "announce_peer":
+            self.got_announce_peer_response(query)
 
     def handle_input(self, fd, events):
         #import pdb; pdb.set_trace()
