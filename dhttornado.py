@@ -7,9 +7,24 @@ from struct import *
 import sys, re, random, thread, threading, os, re
 from cStringIO import StringIO
 from heapq import heappush, heappop, nsmallest
+import logging
 
-from tornado import ioloop
+import tornado.ioloop
 from tornado import iostream
+
+import tornado.options
+from tornado.options import define, options
+import tornado.web
+
+ioloop = tornado.ioloop.IOLoop()
+ioloop.install()
+
+define('debug',default=True, type=bool) # save file causes autoreload
+define('frontend_port',default=7070, type=int)
+tornado.options.parse_command_line()
+settings = dict( (k, v.value()) for k,v in options.items() )
+import tornado.httpserver
+
 
 #Project TODO:
 #Responding to queries
@@ -94,7 +109,7 @@ class DHTPeer(object):
     def __str__(self):
         return self.__repr__()
 
-    def __repr__(self):
+    def __no_repr__(self):
         return "ID:%s IP:%s PORT:%s\n" % (self.id, self.ip_port[0], self.ip_port[1])
 
 
@@ -110,7 +125,7 @@ class DHTBucket(object):
     def __str__(self):
         return self.__repr__()
 
-    def __repr__(self):
+    def __no_repr__(self):
         ret_str = ""
         if self.value:
             ret_str += "V(%s)  " % self.value
@@ -174,7 +189,7 @@ class DHTTree(object):
         elif isinstance(target, DHTPeer):
             key = target
         else:
-            print "Target must be either a string or DHTPeer type"
+            logging.error( "Target must be either a string or DHTPeer type" )
             return -1
 
         #This should iterate down the same side of a tree as the key provided.
@@ -185,7 +200,7 @@ class DHTTree(object):
             try:
                 b = key.next()
             except Exception, e:
-                print "Fell off the bottom of the DHT routing tree."
+                logging.error( "Fell off the bottom of the DHT routing tree." )
                 raise e
 
             next_node = cur_node[b]
@@ -267,7 +282,7 @@ class DHTTree(object):
                 else:
                     if dht_node not in cur_node.value:
                         cur_node.value.append(dht_node)
-                        print str(cur_node.value)
+                        logging.info( str(cur_node.value) )
                         break
 
 
@@ -313,7 +328,7 @@ class DHT(object):
         self.routing_table = DHTTree(self)
 
         self.port = port
-        self.io_loop = io_loop or ioloop.IOLoop.instance()
+        self.io_loop = io_loop or tornado.ioloop.IOLoop.instance()
 
         self.queries = {}
         self.node_lists = {}
@@ -346,12 +361,12 @@ class DHT(object):
 
     def bootstrap_by_finding_myself(self):
         target = self.bootstrapping_nodes[self.current_bootstrap_node]
-        print "Bootstrapping to %s\n" % target
+        logging.info( "Bootstrapping to %s\n" % target )
 
         try:
             self.find_node(target)
         except Exception, e:
-            print str(e)
+            logging.error( str(e) )
             self.io_loop.add_timeout(time.time() + self.bootstrap_delay+ 10, self.bootstrap_by_finding_myself)
 
         #XXX: The return  is temporary
@@ -378,7 +393,7 @@ class DHT(object):
         #ping Query = {"t":"aa", "y":"q", "q":"ping", "a":{"id":"abcdefghij0123456789"}}
         #Response = {"t":"aa", "y":"r", "r": {"id":"mnopqrstuvwxyz123456"}}
     def ping(self, ip_port):
-        print "PING ----%s--->\n" % str(ip_port)
+        logging.info( "PING ----%s--->\n" % str(ip_port) )
         t_id = self.get_trasaction_id()
         ping_msg = {"t": t_id, "y": "q", "q": "ping", "a": {"id": self.id}}
         self.sock.sendto(bencode(ping_msg), ip_port)
@@ -390,14 +405,14 @@ class DHT(object):
         #add responder.id to my RoutingTable
         transaction_id = response["t"]
         q = self.queries[transaction_id]
-        print "<----%s--- PONG\n" % str(q.ip_port)
+        logging.info( "<----%s--- PONG\n" % str(q.ip_port) )
         self.routing_table.insert(DHTPeer(response['r']['id'], q.ip_port))
         del self.queries[transaction_id]
 
 
     def got_ping_query(self, query, source_ip_port):
         transaction_id = query["t"]
-        print "<----~~~--- PING ..%s.. PONG ------------> \n" % str(source_ip_port)
+        logging.info( "<----~~~--- PING ..%s.. PONG ------------> \n" % str(source_ip_port) )
         self.routing_table.insert(DHTPeer(query['a']['id'], source_ip_port))
         pong_msg_reply = {"t": transaction_id, "y": "r", "r": {"id": self.id}}
         self.sock.sendto(bencode(pong_msg_reply), source_ip_port)
@@ -421,7 +436,7 @@ class DHT(object):
             self.send_find_node_message(target, n.ip_port)
 
     def send_find_node_message(self, target, ip_port):
-        print "FIND NODE ----%s--->\n" % str(ip_port)
+        logging.info( "FIND NODE ----%s--->\n" % str(ip_port) )
         t_id = self.get_trasaction_id()
         find_node_msg = {"t": t_id, "y": "q", "q": "find_node", "a": {"id": self.id, "target": target}}
         self.sock.sendto(bencode(find_node_msg), ip_port)
@@ -441,7 +456,7 @@ class DHT(object):
         #Not the target
 
     def got_find_node_query(self, query, source_ip_port):
-        print "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port)
+        logging.info( "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port) )
 
         transaction_id = self.get_trasaction_id()
         token = hashlib.sha1(self.generate_token()).digest()
@@ -463,7 +478,7 @@ class DHT(object):
         #print "Got find_node response"
         transaction_id = response["t"]
         target_id = self.get_original_target_id_from_response(response)
-        print "<----%s--- FIND_NODES \n" % target_id
+        logging.info( "<----%s--- FIND_NODES \n" % target_id )
 
         if response['r'].has_key('nodes'):
             #print "The response has nodes"
@@ -477,7 +492,7 @@ class DHT(object):
             #if not messaged_a_node: #TODO and all or some find_nodes messages have gotten responses or timed out
             #    print "\n\n!!!!!!!!You have found all the closest nodes to %s!!!!!!!!\n\n" % target_id
         else:
-            print "Response for find_node has no nodes:\n%s" % str(response)
+            logging.info( "Response for find_node has no nodes:\n%s" % str(response) )
         del self.queries[transaction_id]
         #print str(self.routing_table._root)
 
@@ -537,14 +552,14 @@ class DHT(object):
 
 
     def send_get_peers_message(self, info_hash, ip_port):       
-        print "GET PEERS ----%s--->\n" % str(ip_port)
+        logging.info( "GET PEERS ----%s--->\n" % str(ip_port) )
         trasaction_id = self.get_trasaction_id()
         get_peers_msg = {"t": trasaction_id, "y": "q", "q": "get_peers", "a": {"id": self.id, "info_hash": info_hash}}
         self.sock.sendto(bencode(get_peers_msg), ip_port)
         self.queries[trasaction_id] = DHTQuery(get_peers_msg, ip_port)
 
     def got_get_peers_query(self, query, source_ip_port):
-        print "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port)
+        logging.info( "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port) )
 
         transaction_id = self.get_trasaction_id()
         token = hashlib.sha1(self.generate_token()).digest()
@@ -577,7 +592,7 @@ class DHT(object):
         #import pdb; pdb.set_trace()
         #print "Got get_peers response"
         target_id = self.get_original_info_hash_from_response(response)
-        print "<----%s--- GET_PEERS \n" % target_id
+        logging.info( "<----%s--- GET_PEERS \n" % target_id )
 
         if response['r'].has_key('nodes'):
             #print "The get_peers response has nodes"
@@ -593,12 +608,12 @@ class DHT(object):
         elif response['r'].has_key('values'):
             #print "\n\n!!!!The get_peers has values!!!!\n\n"
             self.add_peers_to_list(response, target_id)
-            print str(self.infohash_peers[self.infohash_peers.keys()[0]].keys())
+            logging.info( str(self.infohash_peers[self.infohash_peers.keys()[0]].keys()) )
             import pdb; pdb.set_trace()
             #XXX: Maybe I should announce back even if they dont have a peer list for me?
             self.announce_peer(target_id, ip_port, response)        
         else:
-            print "Response for find_node has no nodes:\n%s" % str(response)
+            logging.info( "Response for find_node has no nodes:\n%s" % str(response) )
 
         transaction_id = response["t"]
         del self.queries[transaction_id]
@@ -629,7 +644,7 @@ class DHT(object):
         #Response = {"t":"aa", "y":"r", "r": {"id":"mnopqrstuvwxyz123456"}}
     def announce_peer(self, info_hash, ip_port, response):
         token = response['r']['token']
-        print "ANNOUNCE_PEER ----%s--->\n" % str(ip_port)
+        logging.info( "ANNOUNCE_PEER ----%s--->\n" % str(ip_port) )
         t_id = self.get_trasaction_id()
         announce_peer_msg = {"t": t_id, "y": "q", "q": "announce_peer", "a": {"id": self.id, "info_hash": info_hash, "token": token, "port": self.port}}
         self.sock.sendto(bencode(announce_peer_msg), ip_port)
@@ -644,7 +659,7 @@ class DHT(object):
 
     def got_announce_peer_response(self, response):
         target_id = self.get_original_target_id_from_response(response)
-        print "<----%s--- ANNOUNCE_PEER \n" % target_id
+        logging.info( "<----%s--- ANNOUNCE_PEER \n" % target_id )
         transaction_id = response["t"]
         del self.queries[transaction_id]
         
@@ -655,7 +670,7 @@ class DHT(object):
 
         if not self.queries.has_key(t_id):
             #import pdb; pdb.set_trace()
-            print "I dont have a transaction ID that matches this response"
+            logging.info( "I dont have a transaction ID that matches this response" )
             return
 
         original_query = self.queries[t_id].msg
@@ -704,7 +719,7 @@ class DHT(object):
 
     def get_peers_test(self):
         target_id = "E1BB7F58B13895BFA0E710CA17923CD48B0CD126".decode("hex") #"680fb886bed7b85f1acea40dcc2828dc75a425f3".upper().decode("hex")
-        print "\n\n\nGet Peers for %s\n\n\n" % target_id
+        logging.info( "\n\n\nGet Peers for %s\n\n\n" % target_id )
         self.get_peers(target_id)
         self.io_loop.add_timeout(time.time() + 5, self.get_peers_test)
 
@@ -720,8 +735,64 @@ class DHT(object):
         self.io_loop.start() 
         #distance(A,B) = |A xor B| Smaller values are closer.
 
+
+import json
+class ComplexEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, DHTPeer):
+            return 'DHTPeer'
+        else:
+            return json.JSONEncoder.default(self, obj)
+
+class IndexHandler(tornado.web.RequestHandler):
+    @classmethod
+    def register_dht(self, dht):
+        self.dht = dht
+
+    def get(self):
+
+        def populate(tree, dict):
+            if tree.left:
+                dict['left'] = {}
+                populate(tree.left, dict['left'])
+            if tree.right:
+                dict['right'] = {}
+                populate(tree.right, dict['right'])
+            if tree.value:
+                dict['value'] = tree.value
+
+            return dict
+
+        rt = {}
+
+        populate(self.dht.routing_table._root, rt)
+
+        d = {'dht':str(self.dht),
+             'boostrapping_nodes': len(self.dht.bootstrapping_nodes),
+             'routing_table': str(self.dht.routing_table),
+             'rt': rt
+             }
+        self.set_header('Content-Type','text/plain')
+        self.write( json.dumps(d, indent=2, cls=ComplexEncoder ) )
+
+
+
+
+frontend_routes = [
+    ('/?', IndexHandler),
+]
+frontend_application = tornado.web.Application(frontend_routes, **settings)
+frontend_server = tornado.httpserver.HTTPServer(frontend_application, io_loop=ioloop)
+frontend_server.bind(options.frontend_port, '')
+frontend_server.start()
+
+
+
 if __name__ == "__main__":
     dht = DHT(51414, ip_ports)
+
+    IndexHandler.register_dht(dht)
+
 
     import sys, signal
     def quit():
