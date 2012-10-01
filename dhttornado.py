@@ -165,7 +165,7 @@ class DHTBucket(object):
 
 
 class DHTTree(object):
-    MAX_LIST_LENGTH = 80
+    MAX_LIST_LENGTH = 8
     BUCKET_UPDATE_TIME = 5
     def __init__(self, dht):
         self._root = DHTBucket(None, None)
@@ -592,7 +592,7 @@ class DHT(object):
         #import pdb; pdb.set_trace()
         #print "Got get_peers response"
         target_id = self.get_original_info_hash_from_response(response)
-        logging.info( "<----%s--- GET_PEERS \n" % target_id )
+        logging.info( "<----%s--- GET_PEERS \n" % [target_id] )
 
         if response['r'].has_key('nodes'):
             #print "The get_peers response has nodes"
