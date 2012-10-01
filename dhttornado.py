@@ -1,5 +1,5 @@
 from dht_bootstrapper import bht
-import requests
+import requests, random
 from functools import partial
 from bencode import bdecode, bencode
 import hashlib, socket, array, time
@@ -18,7 +18,7 @@ from tornado import iostream
 
 #This is just an array from the bootrstrap (bht) project I have
 #That I am using for testing right now
-ip_ports = [('58.7.64.238', 61727), ('74.124.166.134', 8999), ('194.8.156.176', 36596), ('59.167.94.10', 37120), ('50.71.135.22', 49523), ('86.1.221.110', 38670), ('23.17.73.219', 36094), ('70.79.118.134', 49045)]
+ip_ports = [('202.177.254.130', 43251), ('71.7.233.108', 40641), ('189.223.55.147', 54037), ('186.213.54.11', 57479), ('85.245.177.29', 58042), ('2.81.68.199', 37263), ('188.24.193.27', 15796), ('210.252.33.4', 39118), ('175.143.215.38', 56067), ('95.42.100.15', 34278), ('211.224.26.47', 25628), ('92.6.154.240', 48783), ('173.255.163.104', 52159), ('2.10.206.61', 12815), ('187.123.98.253', 58901), ('83.134.13.212', 10770), ('78.139.207.123', 50045), ('125.25.191.209', 56548), ('71.234.82.146', 14973), ('72.207.74.219', 14884), ('79.136.190.188', 50634), ('72.80.103.198', 36823), ('77.122.72.44', 56554)]
 
 
 #This just returns a random number between 0 and MAX 32 Bit Int
@@ -95,7 +95,7 @@ class DHTPeer(object):
         return self.__repr__()
 
     def __repr__(self):
-        return "ID:%s IP:%s PORT: %s" % (self.id, self.ip_port[0], self.ip_port[1])
+        return "ID:%s IP:%s PORT:%s\n" % (self.id, self.ip_port[0], self.ip_port[1])
 
 
 class DHTBucket(object):
@@ -150,7 +150,7 @@ class DHTBucket(object):
 
 
 class DHTTree(object):
-    MAX_LIST_LENGTH = 8
+    MAX_LIST_LENGTH = 80
     BUCKET_UPDATE_TIME = 5
     def __init__(self, dht):
         self._root = DHTBucket(None, None)
@@ -267,12 +267,11 @@ class DHTTree(object):
                 else:
                     if dht_node not in cur_node.value:
                         cur_node.value.append(dht_node)
+                        print str(cur_node.value)
                         break
 
 
 class NodeListHeap(object):
-    CONTACT_LIST_LENGTH = 8
-    TIME_TILL_STALE = 60 * 10     #10 min
     def __init__(self, dht_node_id):
         self.dht_node_id = dht_node_id
         self.node_heap = []
@@ -294,7 +293,7 @@ class NodeListHeap(object):
         self.time_last_updated = time.time()
 
     def get_next_closest_nodes(self):
-        return [i[1] for i in nsmallest(NodeListHeap.CONTACT_LIST_LENGTH, self.node_heap)]
+        return [i[1] for i in nsmallest(DHTTree.MAX_LIST_LENGTH, self.node_heap)]
 
 
 class DHT(object):
@@ -340,6 +339,11 @@ class DHT(object):
                 bitmask = bitmask >> 1
                 self.bootstrapping_nodes.append(array_to_string(bytes))
 
+        random.seed()
+
+    def generate_token(self):
+        return str(self.id) + str(random.randint(0,10000))
+
     def bootstrap_by_finding_myself(self):
         target = self.bootstrapping_nodes[self.current_bootstrap_node]
         print "Bootstrapping to %s\n" % target
@@ -351,7 +355,7 @@ class DHT(object):
             self.io_loop.add_timeout(time.time() + self.bootstrap_delay+ 10, self.bootstrap_by_finding_myself)
 
         #XXX: The return  is temporary
-        return
+        #return
 
 
         self.current_bootstrap_node = self.current_bootstrap_node + 1
@@ -387,13 +391,16 @@ class DHT(object):
         transaction_id = response["t"]
         q = self.queries[transaction_id]
         print "<----%s--- PONG\n" % str(q.ip_port)
-
         self.routing_table.insert(DHTPeer(response['r']['id'], q.ip_port))
-
         del self.queries[transaction_id]
 
-    def got_ping_response(self, query):
-        pass
+
+    def got_ping_query(self, query, source_ip_port):
+        transaction_id = query["t"]
+        print "<----~~~--- PING ..%s.. PONG ------------> \n" % str(source_ip_port)
+        self.routing_table.insert(DHTPeer(query['a']['id'], source_ip_port))
+        pong_msg_reply = {"t": transaction_id, "y": "r", "r": {"id": self.id}}
+        self.sock.sendto(bencode(pong_msg_reply), source_ip_port)
 
         #~~~~~~~~~~~~~~~~ MESSAGE: find_node
         #find_node Query = {"t":"aa", "y":"q", "q":"find_node", "a": {"id":"abcdefghij0123456789", "target":"mnopqrstuvwxyz123456"}}
@@ -407,7 +414,7 @@ class DHT(object):
         closest_bucket = self.routing_table.get_target_bucket(target)
 
         if not closest_bucket:
-            import pdb; pdb.set_trace()
+            #import pdb; pdb.set_trace()
             raise Exception("TODO: Fix get_target_bucket, make it get something. There are no nodes in the routing table to send find node messages.")
         #Iterate over and find closest N nodes
         for n in closest_bucket:
@@ -433,13 +440,29 @@ class DHT(object):
         #nodes ur gonna get. Ur down. U just found the closest nodes.
         #Not the target
 
-    def got_find_node_response(self, query):
-        pass
+    def got_find_node_query(self, query, source_ip_port):
+        print "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port)
+
+        transaction_id = self.get_trasaction_id()
+        token = hashlib.sha1(self.generate_token()).digest()
+        info_hash = query['a']['info_hash']
+
+        nodes = ""
+        for n in self.iterate_closest_nodes(info_hash):
+        #for node_id, node_id_port in self.infohash_peers[info_hash]:
+            ip_array = map(int, n.ip_port[0].split("."))
+            cur_node_str = pack(">20sBBBBH", n.id, ip_array[0], ip_array[1], ip_array[2], ip_array[3], n.ip_port[1])
+            nodes += cur_node_str
+        
+        find_node_response_msg = {"t": transaction_id, "y": "r", "r": {"id": self.id, "nodes": nodes}}
+        self.sock.sendto(bencode(find_node_response_msg), ip_port)
+        #llself.queries[trasaction_id] = DHTQuery(get_peers_response_msg, ip_port)
+
 
     def got_find_node_response(self, response):
         #print "Got find_node response"
-        import pdb; pdb.set_trace()
-        target_id = self.get_target_id_from_response(response)
+        transaction_id = response["t"]
+        target_id = self.get_original_target_id_from_response(response)
         print "<----%s--- FIND_NODES \n" % target_id
 
         if response['r'].has_key('nodes'):
@@ -447,23 +470,23 @@ class DHT(object):
             self.add_nodes_to_heap(response, target_id)
 
             messaged_a_node = False
-            for ip_port in self.iterate_closest_nodes(target_id):
+            for n in self.iterate_closest_nodes(target_id):
                 messaged_a_node = True
-                self.send_find_node_message(target_id, ip_port)
+                self.send_find_node_message(target_id, n.ip_port)
 
             #if not messaged_a_node: #TODO and all or some find_nodes messages have gotten responses or timed out
             #    print "\n\n!!!!!!!!You have found all the closest nodes to %s!!!!!!!!\n\n" % target_id
         else:
             print "Response for find_node has no nodes:\n%s" % str(response)
-
+        del self.queries[transaction_id]
         #print str(self.routing_table._root)
 
-    def get_target_id_from_response(self, response):
+    def get_original_target_id_from_response(self, response):
         transaction_id = response["t"]
         original_query = self.queries[transaction_id].msg
         return original_query['a']['target']
 
-    def get_info_hash_from_response(self, response):
+    def get_original_info_hash_from_response(self, response):
         transaction_id = response["t"]
         original_query = self.queries[transaction_id].msg
         return original_query['a']['info_hash']        
@@ -495,7 +518,7 @@ class DHT(object):
         for n in node_list.get_next_closest_nodes():
             if not node_list.contacted.has_key(n.id):
                 node_list.contacted[n.id] = True
-                yield n.ip_port
+                yield n
                 
 
         #~~~~~~~~~~~~~~~~ MESSAGE: get_peers
@@ -506,8 +529,8 @@ class DHT(object):
         #Find the bucket in the routing table for the target
         closest_bucket = self.routing_table.get_target_bucket(info_hash)
 
-        if not closest_bucket:
-            raise Exception("TODO: Fix get_target_bucket, make it get something. There are no nodes in the routing table to send find node messages.")
+        #if not closest_bucket:
+        #    raise Exception("TODO: Fix get_target_bucket, make it get something. There are no nodes in the routing table to send find node messages.")
         #Iterate over and find closest N nodes
         for n in closest_bucket:
             self.send_get_peers_message(info_hash, n.ip_port)
@@ -520,12 +543,40 @@ class DHT(object):
         self.sock.sendto(bencode(get_peers_msg), ip_port)
         self.queries[trasaction_id] = DHTQuery(get_peers_msg, ip_port)
 
-    def got_get_peers_response(self, query):
-        pass
+    def got_get_peers_query(self, query, source_ip_port):
+        print "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port)
+
+        transaction_id = self.get_trasaction_id()
+        token = hashlib.sha1(self.generate_token()).digest()
+        info_hash = query['a']['info_hash']
+
+        get_peers_response_dict = {"id": self.id, "token": token}
+
+        if self.infohash_peers.has_key(info_hash):
+            ip_ports = self.infohash_peers[info_hash].keys()
+            values = []
+            for ip_port in ip_ports:
+                ip_array = map(int, n.ip_port[0].split("."))
+                values.append(pack(">BBBBH", ip_array[0], ip_array[1], ip_array[2], ip_array[3], node_id_port[1]))
+            get_peers_response_dict['values'] = values
+        else:
+            nodes = ""
+            for n in self.iterate_closest_nodes(info_hash):
+            #for node_id, node_id_port in self.infohash_peers[info_hash]:
+                ip_array = map(int, n.ip_port[0].split("."))
+                cur_node_str = pack(">20sBBBBH", n.id, ip_array[0], ip_array[1], ip_array[2], ip_array[3], n.ip_port[1])
+                nodes += cur_node_str
+            get_peers_response_dict['nodes'] = nodes
+
+        get_peers_response_msg = {"t": transaction_id, "y": "r", "r": get_peers_response_dict}
+        self.sock.sendto(bencode(get_peers_response_msg), ip_port)
+        #llself.queries[trasaction_id] = DHTQuery(get_peers_response_msg, ip_port)
+
 
     def got_get_peers_response(self, response):
+        #import pdb; pdb.set_trace()
         #print "Got get_peers response"
-        target_id = self.get_info_hash_from_response(response)
+        target_id = self.get_original_info_hash_from_response(response)
         print "<----%s--- GET_PEERS \n" % target_id
 
         if response['r'].has_key('nodes'):
@@ -533,21 +584,24 @@ class DHT(object):
             self.add_nodes_to_heap(response, target_id)
 
             messaged_a_node = False
-            for ip_port in self.iterate_closest_nodes(target_id):
+            for n in self.iterate_closest_nodes(target_id):
                 messaged_a_node = True
-                self.send_get_peers_message(target_id, ip_port)
+                self.send_get_peers_message(target_id, n.ip_port)
 
             #if not messaged_a_node: #TODO and all or some find_nodes messages have gotten responses or timed out
             #    print "\n\n!!!!!!!!You have found all the closest nodes to %s!!!!!!!!\n\n" % target_id
         elif response['r'].has_key('values'):
-            import pdb; pdb.set_trace()
             #print "\n\n!!!!The get_peers has values!!!!\n\n"
             self.add_peers_to_list(response, target_id)
+            print str(self.infohash_peers[self.infohash_peers.keys()[0]].keys())
+            import pdb; pdb.set_trace()
             #XXX: Maybe I should announce back even if they dont have a peer list for me?
             self.announce_peer(target_id, ip_port, response)        
         else:
             print "Response for find_node has no nodes:\n%s" % str(response)
 
+        transaction_id = response["t"]
+        del self.queries[transaction_id]
         #print str(self.routing_table._root)
 
     def add_peers_to_list(self, response, target_id):
@@ -559,8 +613,11 @@ class DHT(object):
         #print "Got a list of %d peers" % len(peer_ip_port_strs)
 
         for ip_port_str in peer_ip_port_strs:
-            ip_bytes, port = unpack(">4sH",  ip_port_str)
+            ip_bytes, port = unpack("!4sH",  ip_port_str)
             ip_str = '.'.join(map(str, map(ord, ip_bytes)))
+
+            ip1, ip2, ip3, ip4, port = unpack("!BBBBH",  ip_port_str)
+            assert(ip_str == "%s.%s.%s.%s" % (ip1, ip2, ip3, ip4))
 
             self.infohash_peers[target_id][(ip_str, port)] = time.time()     
 
@@ -573,24 +630,31 @@ class DHT(object):
     def announce_peer(self, info_hash, ip_port, response):
         token = response['r']['token']
         print "ANNOUNCE_PEER ----%s--->\n" % str(ip_port)
-        t _id = self.get_trasaction_id()
+        t_id = self.get_trasaction_id()
         announce_peer_msg = {"t": t_id, "y": "q", "q": "announce_peer", "a": {"id": self.id, "info_hash": info_hash, "token": token, "port": self.port}}
         self.sock.sendto(bencode(announce_peer_msg), ip_port)
         self.queries[t_id] = DHTQuery(announce_peer_msg, ip_port)
 
-    def got_announce_peer_response(self, query):
-        pass
+    def got_announce_peer_query(self, query, source_ip_port):
+        #announce_peers Query = {"t":"aa", "y":"q", "q":"announce_peer", "a": {"id":"abcdefghij0123456789", "info_hash":"mnopqrstuvwxyz123456", "port": 6881, "token": "aoeusnth"}}
+        info_hash = query['a']['info_hash']
+        port = int(query['a']['port'])
+
+        self.infohash_peers[info_hash][(source_ip_port[0], port)] = time.time()
 
     def got_announce_peer_response(self, response):
-        target_id = self.get_target_id_from_response(response)
+        target_id = self.get_original_target_id_from_response(response)
         print "<----%s--- ANNOUNCE_PEER \n" % target_id
+        transaction_id = response["t"]
+        del self.queries[transaction_id]
         
 
-    def handle_response(self, response):
+    def handle_response(self, response, source_ip_port):
         responder_id = response["r"]["id"]
         t_id = response["t"]
 
         if not self.queries.has_key(t_id):
+            #import pdb; pdb.set_trace()
             print "I dont have a transaction ID that matches this response"
             return
 
@@ -605,30 +669,30 @@ class DHT(object):
         elif original_query["q"] == "announce_peer":
             self.got_announce_peer_response(response)
 
-    def handle_query(self, query):
+    def handle_query(self, query, source_ip_port):
         if query["q"] == "ping":
-            self.got_ping_response(query)
+            self.got_ping_query(query, source_ip_port)
         elif query["q"] == "find_node":
-            self.got_find_node_response(query)
+            self.got_find_node_query(query, source_ip_port)
         elif query["q"] == "get_peers":
-            self.got_get_peers_response(query)
+            self.got_get_peers_query(query, source_ip_port)
         elif query["q"] == "announce_peer":
-            self.got_announce_peer_response(query)
+            self.got_announce_peer_query(query, source_ip_port)
 
     def handle_input(self, fd, events):
         #import pdb; pdb.set_trace()
         #print "."
-        data = self.sock.recv(4096)
+        (data, source_ip_port) = self.sock.recvfrom(4096)
         bdict = bdecode(data)
 
         #Got a response from some previous query
         if bdict["y"] == "r":
-            self.handle_response(bdict)
+            self.handle_response(bdict, source_ip_port)
 
         #Porb gonna have to ad a listenr socket
         #Got a query for something
         if bdict["y"] == "q":
-            self.handle_query(bdict)
+            self.handle_query(bdict, source_ip_port)
 
         #bdict['r']['id']
         #print "Got dict:%s" % bdict
@@ -640,16 +704,16 @@ class DHT(object):
 
 
     def get_peers_test(self):
-        target_id = "0670DCEF46F9F9C7E5F980EA23F9EA441BD7F00F".decode("hex")
+        target_id = "E1BB7F58B13895BFA0E710CA17923CD48B0CD126".decode("hex") #"680fb886bed7b85f1acea40dcc2828dc75a425f3".upper().decode("hex")
         print "\n\n\nGet Peers for %s\n\n\n" % target_id
         self.get_peers(target_id)
         self.io_loop.add_timeout(time.time() + 5, self.get_peers_test)
 
     #XXX: This could block on sock.sendto, maybe do non blocking
     def start(self):
-        self.io_loop.add_timeout(time.time() + DHT.INITIAL_BOOTSTRAP_DELAY, self.bootstrap_by_finding_myself)
+        #self.io_loop.add_timeout(time.time() + DHT.INITIAL_BOOTSTRAP_DELAY, self.bootstrap_by_finding_myself)
 
-        #self.io_loop.add_timeout(time.time() + 15, self.get_peers_test)
+        self.io_loop.add_timeout(time.time() + 15, self.get_peers_test)
 
         for ip_port in self.ip_ports: 
             self.ping(ip_port)
@@ -659,9 +723,19 @@ class DHT(object):
 
 if __name__ == "__main__":
     dht = DHT(51414, ip_ports)
+
+    import sys, signal
+    def quit():
+        sys.exit(0)
+
+    def signal_handler(signal, frame):
+        import pdb; pdb.set_trace()
+    
+    #signal.signal(signal.SIGINT, signal_handler)
+    
+    
     dht.start()
 
-    import pdb; pdb.set_trace();
 
 
 

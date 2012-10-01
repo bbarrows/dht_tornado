@@ -44,7 +44,7 @@ I get values form the get peers response and start downloading.
 I then announce to the closest 8 people that I am downloading that info hash. With annouce peers.
 
 
-I receive an annouce peer:
+If I receive an annouce peer:
 	I add the peer to my info hashes 
 
 
@@ -79,3 +79,11 @@ Torrent Mag UTMetadata Extension is how I get a torrent file for an ID Hash
 
 
 LibTorrent and python bindings
+
+
+
+
+
+TODO:
+
+Chart the number of hops to find peers
