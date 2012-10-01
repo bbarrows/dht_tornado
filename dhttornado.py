@@ -33,7 +33,7 @@ import tornado.httpserver
 
 #This is just an array from the bootrstrap (bht) project I have
 #That I am using for testing right now
-ip_ports = [('202.177.254.130', 43251), ('71.7.233.108', 40641), ('189.223.55.147', 54037), ('186.213.54.11', 57479), ('85.245.177.29', 58042), ('2.81.68.199', 37263), ('188.24.193.27', 15796), ('210.252.33.4', 39118), ('175.143.215.38', 56067), ('95.42.100.15', 34278), ('211.224.26.47', 25628), ('92.6.154.240', 48783), ('173.255.163.104', 52159), ('2.10.206.61', 12815), ('187.123.98.253', 58901), ('83.134.13.212', 10770), ('78.139.207.123', 50045), ('125.25.191.209', 56548), ('71.234.82.146', 14973), ('72.207.74.219', 14884), ('79.136.190.188', 50634), ('72.80.103.198', 36823), ('77.122.72.44', 56554)]
+ip_ports = [('kzahel.dyndns.org', 14098)] #[('202.177.254.130', 43251), ('71.7.233.108', 40641), ('189.223.55.147', 54037), ('186.213.54.11', 57479), ('85.245.177.29', 58042), ('2.81.68.199', 37263), ('188.24.193.27', 15796), ('210.252.33.4', 39118), ('175.143.215.38', 56067), ('95.42.100.15', 34278), ('211.224.26.47', 25628), ('92.6.154.240', 48783), ('173.255.163.104', 52159), ('2.10.206.61', 12815), ('187.123.98.253', 58901), ('83.134.13.212', 10770), ('78.139.207.123', 50045), ('125.25.191.209', 56548), ('71.234.82.146', 14973), ('72.207.74.219', 14884), ('79.136.190.188', 50634), ('72.80.103.198', 36823), ('77.122.72.44', 56554)]
 
 
 #This just returns a random number between 0 and MAX 32 Bit Int
@@ -109,8 +109,8 @@ class DHTPeer(object):
     def __str__(self):
         return self.__repr__()
 
-    def __no_repr__(self):
-        return "ID:%s IP:%s PORT:%s\n" % (self.id, self.ip_port[0], self.ip_port[1])
+    def __repr__(self):
+        return "ID:%s IP:%s PORT:%s" % (self.id.encode("hex"), self.ip_port[0], self.ip_port[1])
 
 
 class DHTBucket(object):
@@ -125,7 +125,7 @@ class DHTBucket(object):
     def __str__(self):
         return self.__repr__()
 
-    def __no_repr__(self):
+    def __repr__(self):
         ret_str = ""
         if self.value:
             ret_str += "V(%s)  " % self.value
@@ -287,11 +287,19 @@ class DHTTree(object):
 
 
 class NodeListHeap(object):
+    CLOSEST_HEAP_LENGTH = 30
     def __init__(self, dht_node_id):
         self.dht_node_id = dht_node_id
         self.node_heap = []
         self.contacted = {}
         self.time_last_updated = 0
+
+    def get_debug_array(self):
+        ret_arr = []
+        for n in nsmallest(NodeListHeap.CLOSEST_HEAP_LENGTH, self.node_heap):
+            ret_arr.append((n, self.contacted[n[1].id]))
+
+        return ret_arr
 
     def push(self, dht_peer):
         #Define a comparator that compares the distance of nodes' ids to my dht_node_id
@@ -308,7 +316,7 @@ class NodeListHeap(object):
         self.time_last_updated = time.time()
 
     def get_next_closest_nodes(self):
-        return [i[1] for i in nsmallest(DHTTree.MAX_LIST_LENGTH, self.node_heap)]
+        return [i[1] for i in nsmallest(NodeListHeap.CLOSEST_HEAP_LENGTH, self.node_heap)]
 
 
 class DHT(object):
@@ -370,7 +378,7 @@ class DHT(object):
             self.io_loop.add_timeout(time.time() + self.bootstrap_delay+ 10, self.bootstrap_by_finding_myself)
 
         #XXX: The return  is temporary
-        #return
+        return
 
 
         self.current_bootstrap_node = self.current_bootstrap_node + 1
@@ -727,8 +735,9 @@ class DHT(object):
     def start(self):
         #self.io_loop.add_timeout(time.time() + DHT.INITIAL_BOOTSTRAP_DELAY, self.bootstrap_by_finding_myself)
 
-        self.io_loop.add_timeout(time.time() + 15, self.get_peers_test)
-
+        #self.io_loop.add_timeout(time.time() + 15, self.get_peers_test)
+        
+        self.io_loop.add_timeout(time.time() + 5, partial(self.find_node, "\x00" * 20))
         for ip_port in self.ip_ports: 
             self.ping(ip_port)
 
@@ -740,7 +749,7 @@ import json
 class ComplexEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, DHTPeer):
-            return 'DHTPeer'
+            return (obj.id.encode("hex"), obj.ip_port[0], obj.ip_port[1])
         else:
             return json.JSONEncoder.default(self, obj)
 
@@ -770,7 +779,8 @@ class IndexHandler(tornado.web.RequestHandler):
         d = {'dht':str(self.dht),
              'boostrapping_nodes': len(self.dht.bootstrapping_nodes),
              'routing_table': str(self.dht.routing_table),
-             'rt': rt
+             'rt': rt,
+             'node_lists': [n.get_debug_array() for id, n in self.dht.node_lists.iteritems()]
              }
         self.set_header('Content-Type','text/plain')
         self.write( json.dumps(d, indent=2, cls=ComplexEncoder ) )
