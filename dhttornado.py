@@ -1,4 +1,4 @@
-from dht_bootstrapper import bht
+#from dht_bootstrapper import bht
 import requests, random
 from functools import partial
 from bencode import bdecode, bencode
