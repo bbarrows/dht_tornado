@@ -1,5 +1,5 @@
 #from dht_bootstrapper import bht
-import random
+import random, json
 from functools import partial
 from bencode import bdecode, bencode
 import hashlib, socket, array, time
@@ -33,7 +33,8 @@ import tornado.httpserver
 
 #This is just an array from the bootrstrap (bht) project I have
 #That I am using for testing right now
-ip_ports = [('kzahel.dyndns.org', 14098)] #[('202.177.254.130', 43251), ('71.7.233.108', 40641), ('189.223.55.147', 54037), ('186.213.54.11', 57479), ('85.245.177.29', 58042), ('2.81.68.199', 37263), ('188.24.193.27', 15796), ('210.252.33.4', 39118), ('175.143.215.38', 56067), ('95.42.100.15', 34278), ('211.224.26.47', 25628), ('92.6.154.240', 48783), ('173.255.163.104', 52159), ('2.10.206.61', 12815), ('187.123.98.253', 58901), ('83.134.13.212', 10770), ('78.139.207.123', 50045), ('125.25.191.209', 56548), ('71.234.82.146', 14973), ('72.207.74.219', 14884), ('79.136.190.188', 50634), ('72.80.103.198', 36823), ('77.122.72.44', 56554)]
+#ip_ports = [("213.210.206.9", 23783)] #[('kzahel.dyndns.org', 14098)]
+ip_ports =  [('202.177.254.130', 43251), ('71.7.233.108', 40641), ('189.223.55.147', 54037), ('186.213.54.11', 57479), ('85.245.177.29', 58042), ('2.81.68.199', 37263), ('188.24.193.27', 15796), ('210.252.33.4', 39118), ('175.143.215.38', 56067), ('95.42.100.15', 34278), ('211.224.26.47', 25628), ('92.6.154.240', 48783), ('173.255.163.104', 52159), ('2.10.206.61', 12815), ('187.123.98.253', 58901), ('83.134.13.212', 10770), ('78.139.207.123', 50045), ('125.25.191.209', 56548), ('71.234.82.146', 14973), ('72.207.74.219', 14884), ('79.136.190.188', 50634), ('72.80.103.198', 36823), ('77.122.72.44', 56554)]
 
 
 #This just returns a random number between 0 and MAX 32 Bit Int
@@ -57,14 +58,8 @@ def array_to_string(arr):
 def xor_array(n1, n2):
     return [ord(n1[i]) ^ ord(n2[i]) for i,_ in enumerate(n1)]
 
-def byte_array_to_uint(a):
-  ret = 0
-  for b in a:
-    ret = ret * 256 + b
-  return ret
-
 def dht_dist(n1, n2):
-    return byte_array_to_uint(xor_array(n1, n2))
+    return xor_array(n1, n2)
 
 #Returns a iterator that will iterate bit by bit over a string!
 def string_bit_iterator(str_to_iterate):
@@ -154,7 +149,7 @@ class DHTBucket(object):
                 break
 
     def is_full(self):
-        return len(self.value) > DHTTree.MAX_LIST_LENGTH
+        return len(self.value) >= DHTTree.MAX_LIST_LENGTH
 
     def free(self):
         self.left = None
@@ -288,8 +283,8 @@ class DHTTree(object):
 
 class NodeListHeap(object):
     CLOSEST_HEAP_LENGTH = 30
-    def __init__(self, dht_node_id):
-        self.dht_node_id = dht_node_id
+    def __init__(self, target_info_hash):
+        self.target_info_hash = target_info_hash
         self.node_heap = []
         self.contacted = {}
         self.time_last_updated = 0
@@ -312,7 +307,7 @@ class NodeListHeap(object):
             if n[1] == dht_peer:
                 return
 
-        heappush(self.node_heap, (dht_dist(self.dht_node_id, dht_peer.id), dht_peer))
+        heappush(self.node_heap, (dht_dist(self.target_info_hash, dht_peer.id), dht_peer))
         self.time_last_updated = time.time()
 
     def get_next_closest_nodes(self):
@@ -324,6 +319,7 @@ class DHT(object):
     NODE_ID_IP_PORT_LENGTH = 26
     PONG_TIMEOUT = 5
     IP_PORT_LENGTH = 6
+    BOOTSTRAP_DELAY = 60
     def __init__(self, port, bootstrap_ip_ports, node_id = None, io_loop = None):
         self.transaction_id = 0
         self.ip_ports = bootstrap_ip_ports
@@ -345,7 +341,6 @@ class DHT(object):
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.io_loop.add_handler(self.sock.fileno(), self.handle_input, self.io_loop.READ)
-        self.bootstrap_delay = 10
 
         #Make a list of nodes to search for. This shoudl make it so my 
         #routing table has a wide variety of nodes
@@ -369,23 +364,19 @@ class DHT(object):
 
     def bootstrap_by_finding_myself(self):
         target = self.bootstrapping_nodes[self.current_bootstrap_node]
-        logging.info( "Bootstrapping to %s\n" % target )
+        logging.info( "Bootstrapping to %s\n" % target.encode("hex") )
 
         try:
             self.find_node(target)
         except Exception, e:
             logging.error( str(e) )
-            self.io_loop.add_timeout(time.time() + self.bootstrap_delay+ 10, self.bootstrap_by_finding_myself)
-
-        #XXX: The return  is temporary
-        return
-
+            self.io_loop.add_timeout(time.time() + DHT.BOOTSTRAP_DELAY + 10, self.bootstrap_by_finding_myself)
 
         self.current_bootstrap_node = self.current_bootstrap_node + 1
         if self.current_bootstrap_node >= len(self.bootstrapping_nodes):
             self.current_bootstrap_node = 0
 
-        self.io_loop.add_timeout(time.time() + self.bootstrap_delay, self.bootstrap_by_finding_myself)
+        self.io_loop.add_timeout(time.time() + DHT.BOOTSTRAP_DELAY, self.bootstrap_by_finding_myself)
 
     def get_trasaction_id(self):
         self.transaction_id += 1
@@ -486,7 +477,7 @@ class DHT(object):
         #print "Got find_node response"
         transaction_id = response["t"]
         target_id = self.get_original_target_id_from_response(response)
-        logging.info( "<----%s--- FIND_NODES \n" % target_id )
+        logging.info( "<----%s--- FIND_NODES \n" % target_id.encode("hex") )
 
         if response['r'].has_key('nodes'):
             #print "The response has nodes"
@@ -516,7 +507,7 @@ class DHT(object):
 
     def add_nodes_to_heap(self, response, target_id):
         if not self.node_lists.has_key(target_id):
-            self.node_lists[target_id] = NodeListHeap(self.id)
+            self.node_lists[target_id] = NodeListHeap(target_id)
 
         node_list = self.node_lists[target_id]
         nodes_and_ip_port_str = response['r']['nodes']
@@ -600,9 +591,11 @@ class DHT(object):
         #import pdb; pdb.set_trace()
         #print "Got get_peers response"
         target_id = self.get_original_info_hash_from_response(response)
-        logging.info( "<----%s--- GET_PEERS \n" % [target_id] )
+        logging.info( "<----%s--- GET_PEERS \n" % target_id.encode("hex") )
 
+        #import pdb; pdb.set_trace()
         if response['r'].has_key('nodes'):
+            logging.info("Got nodes")
             #print "The get_peers response has nodes"
             self.add_nodes_to_heap(response, target_id)
 
@@ -617,7 +610,7 @@ class DHT(object):
             #print "\n\n!!!!The get_peers has values!!!!\n\n"
             self.add_peers_to_list(response, target_id)
             logging.info( str(self.infohash_peers[self.infohash_peers.keys()[0]].keys()) )
-            import pdb; pdb.set_trace()
+            #import pdb; pdb.set_trace()
             #XXX: Maybe I should announce back even if they dont have a peer list for me?
             self.announce_peer(target_id, ip_port, response)        
         else:
@@ -667,7 +660,7 @@ class DHT(object):
 
     def got_announce_peer_response(self, response):
         target_id = self.get_original_target_id_from_response(response)
-        logging.info( "<----%s--- ANNOUNCE_PEER \n" % target_id )
+        logging.info( "<----%s--- ANNOUNCE_PEER \n" % target_id.encode("hex") )
         transaction_id = response["t"]
         del self.queries[transaction_id]
         
@@ -726,18 +719,20 @@ class DHT(object):
         pass
 
     def get_peers_test(self):
-        target_id = "E1BB7F58B13895BFA0E710CA17923CD48B0CD126".decode("hex") #"680fb886bed7b85f1acea40dcc2828dc75a425f3".upper().decode("hex")
-        logging.info( "\n\n\nGet Peers for %s\n\n\n" % target_id )
+        #target_id = "E1BB7F58B13895BFA0E710CA17923CD48B0CD126".decode("hex") #
+        target_id = "00b3941b1f279a52902129bda79d1ace4d6f25f4".upper().decode("hex")
+        logging.info( "\n\n\nGet Peers for %s\n\n\n" % target_id.encode("hex") )
         self.get_peers(target_id)
         self.io_loop.add_timeout(time.time() + 5, self.get_peers_test)
 
     #XXX: This could block on sock.sendto, maybe do non blocking
     def start(self):
-        #self.io_loop.add_timeout(time.time() + DHT.INITIAL_BOOTSTRAP_DELAY, self.bootstrap_by_finding_myself)
+        self.io_loop.add_timeout(time.time() + DHT.INITIAL_BOOTSTRAP_DELAY, self.bootstrap_by_finding_myself)
 
-        #self.io_loop.add_timeout(time.time() + 15, self.get_peers_test)
+        #self.io_loop.add_timeout(time.time() + 5, self.get_peers_test)
         
-        self.io_loop.add_timeout(time.time() + 5, partial(self.find_node, "\x00" * 20))
+        #self.io_loop.add_timeout(time.time() + 5, partial(self.find_node, "\x00" * 20))
+        
         for ip_port in self.ip_ports: 
             self.ping(ip_port)
 
@@ -745,7 +740,7 @@ class DHT(object):
         #distance(A,B) = |A xor B| Smaller values are closer.
 
 
-import json
+
 class ComplexEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, DHTPeer):
@@ -779,9 +774,15 @@ class IndexHandler(tornado.web.RequestHandler):
         d = {'dht':str(self.dht),
              'boostrapping_nodes': len(self.dht.bootstrapping_nodes),
              'routing_table': str(self.dht.routing_table),
-             'rt': rt,
-             'node_lists': [n.get_debug_array() for id, n in self.dht.node_lists.iteritems()]
+             'rt': rt
              }
+
+        for id, n in self.dht.node_lists.iteritems():
+            d["Node_List_%s" % id.encode("hex")] = n.get_debug_array()
+
+        for id in self.dht.infohash_peers:
+            d["Peers_for_%s" % id.encode("hex")] = self.dht.infohash_peers[id].keys()
+
         self.set_header('Content-Type','text/plain')
         self.write( json.dumps(d, indent=2, cls=ComplexEncoder ) )
 
