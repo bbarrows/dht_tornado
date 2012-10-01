@@ -1,5 +1,5 @@
 #from dht_bootstrapper import bht
-import requests, random
+import random
 from functools import partial
 from bencode import bdecode, bencode
 import hashlib, socket, array, time
@@ -701,7 +701,6 @@ class DHT(object):
         #Clear old queries that never recieved a response
         #Clear old NodeListHeaps for searches that havent been updated
         pass
-
 
     def get_peers_test(self):
         target_id = "E1BB7F58B13895BFA0E710CA17923CD48B0CD126".decode("hex") #"680fb886bed7b85f1acea40dcc2828dc75a425f3".upper().decode("hex")
