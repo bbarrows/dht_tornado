@@ -16,7 +16,7 @@ import tornado.httpserver
 
 class ComplexEncoder(json.JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, DHTPeer):
+        if isinstance(obj, dht.DHTPeer):
             return (obj.id.encode("hex"), obj.ip_port[0], obj.ip_port[1])
         else:
             return json.JSONEncoder.default(self, obj)
