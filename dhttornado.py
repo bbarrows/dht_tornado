@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
     define('debug',default=True, type=bool) # save file causes autoreload
     define('frontend_port',default=7070, type=int)
-    
+
     tornado.options.parse_command_line()
     settings = dict( (k, v.value()) for k,v in options.items() )
 
@@ -84,6 +84,7 @@ if __name__ == "__main__":
 
     IndexHandler.register_dht(dht)
     
+    dht.bootstrap()
     dht.start()
 
 

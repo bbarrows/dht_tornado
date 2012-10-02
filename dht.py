@@ -695,7 +695,7 @@ class DHT(object):
     #    self.io_loop.add_timeout(time.time() + 5, self.get_peers_test)
 
     #XXX: This could block on sock.sendto, maybe do non blocking
-    def start(self):
+    def bootstrap(self):
         self.io_loop.add_timeout(time.time() + DHT.PONG_TIMEOUT, self.bootstrap_by_finding_myself)
 
         #self.io_loop.add_timeout(time.time() + 5, self.get_peers_test)
@@ -705,9 +705,8 @@ class DHT(object):
         for ip_port in self.ip_ports: 
             self.ping(ip_port)
 
-        self.io_loop.start() 
-        #distance(A,B) = |A xor B| Smaller values are closer.
-
+    def start(self):
+        self.io_loop.start()
 
 
 
