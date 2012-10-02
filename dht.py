@@ -436,7 +436,7 @@ class DHT(object):
 
         transaction_id = self.get_trasaction_id()
         token = hashlib.sha1(self.generate_token()).digest()
-        info_hash = query['a']['info_hash']
+        info_hash = query['a']['target']
 
         nodes = ""
         for n in self.iterate_closest_nodes(info_hash):
