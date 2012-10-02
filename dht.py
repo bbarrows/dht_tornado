@@ -315,6 +315,7 @@ class DHT(object):
         self.queries = {}
         self.node_lists = {}
 
+        self.get_peers_callbacks = {}
         self.infohash_peers = {}
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -516,7 +517,12 @@ class DHT(object):
         #get_peers Query = {"t":"aa", "y":"q", "q":"get_peers", "a": {"id":"abcdefghij0123456789", "info_hash":"mnopqrstuvwxyz123456"}}
         #Response with peers = {"t":"aa", "y":"r", "r": {"id":"abcdefghij0123456789", "token":"aoeusnth", "values": ["axje.u", "idhtnm"]}}
         #Response with closest nodes = {"t":"aa", "y":"r", "r": {"id":"abcdefghij0123456789", "token":"aoeusnth", "nodes": "def456..."}}
-    def get_peers(self, info_hash):
+    def get_peers(self, info_hash, callback = None):
+        if callback:
+            if not self.get_peers_callbacks.has_key(info_hash):
+                self.get_peers_callbacks = []
+            self.get_peers_callbacks[info_hash].append(callback)
+
         #Find the bucket in the routing table for the target
         closest_bucket = self.routing_table.get_target_bucket(info_hash)
 
@@ -587,7 +593,7 @@ class DHT(object):
         elif response['r'].has_key('values'):
             #print "\n\n!!!!The get_peers has values!!!!\n\n"
             self.add_peers_to_list(response, target_id)
-            logging.info( str(self.infohash_peers[self.infohash_peers.keys()[0]].keys()) )
+            #logging.info( str(self.infohash_peers[self.infohash_peers.keys()[0]].keys()) )
             #import pdb; pdb.set_trace()
             #XXX: Maybe I should announce back even if they dont have a peer list for me?
             self.announce_peer(target_id, ip_port, response)        
@@ -606,12 +612,18 @@ class DHT(object):
 
         #print "Got a list of %d peers" % len(peer_ip_port_strs)
 
+        new_peers = []
         for ip_port_str in peer_ip_port_strs:
             ip_bytes, port = unpack("!4sH",  ip_port_str)
             ip_str = '.'.join(map(str, map(ord, ip_bytes)))
 
-            self.infohash_peers[target_id][(ip_str, port)] = time.time()     
+            new_peers.append((ip_str, port))
 
+        for p in new_peers:
+            self.infohash_peers[target_id][p] = time.time()     
+            
+        for callback in self.get_peers_callbacks:
+            callback(new_peers, self.infohash_peers[target_id])
         #print "Peer list for hash:%s is:\n%s" % (target_id, str(self.infohash_peers[target_id]))   
 
 
