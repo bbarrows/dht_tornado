@@ -520,7 +520,7 @@ class DHT(object):
     def get_peers(self, info_hash, callback = None):
         if callback:
             if not self.get_peers_callbacks.has_key(info_hash):
-                self.get_peers_callbacks = []
+                self.get_peers_callbacks[info_hash] = []
             self.get_peers_callbacks[info_hash].append(callback)
 
         #Find the bucket in the routing table for the target
