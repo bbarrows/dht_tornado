@@ -163,7 +163,7 @@ class DHTTree(object):
         elif isinstance(target, DHTPeer):
             key = target
         else:
-            logging.error( "Target must be either a string or DHTPeer type" )
+            #logging.error( "Target must be either a string or DHTPeer type" )
             return -1
 
         #This should iterate down the same side of a tree as the key provided.
@@ -174,7 +174,7 @@ class DHTTree(object):
             try:
                 b = key.next()
             except Exception, e:
-                logging.error( "Fell off the bottom of the DHT routing tree." )
+                #logging.error( "Fell off the bottom of the DHT routing tree." )
                 raise e
 
             next_node = cur_node[b]
@@ -256,7 +256,7 @@ class DHTTree(object):
                 else:
                     if dht_node not in cur_node.value:
                         cur_node.value.append(dht_node)
-                        logging.info( str(cur_node.value) )
+                        #logging.info( str(cur_node.value) )
                         break
 
 
@@ -343,7 +343,7 @@ class DHT(object):
 
     def bootstrap_by_finding_myself(self):
         target = self.bootstrapping_nodes[self.current_bootstrap_node]
-        logging.info( "Bootstrapping to %s\n" % target.encode("hex") )
+        #logging.info( "Bootstrapping to %s\n" % target.encode("hex") )
 
         try:
             self.find_node(target)
@@ -371,7 +371,7 @@ class DHT(object):
         #ping Query = {"t":"aa", "y":"q", "q":"ping", "a":{"id":"abcdefghij0123456789"}}
         #Response = {"t":"aa", "y":"r", "r": {"id":"mnopqrstuvwxyz123456"}}
     def ping(self, ip_port):
-        logging.info( "PING ----%s--->\n" % str(ip_port) )
+        #logging.info( "PING ----%s--->\n" % str(ip_port) )
         t_id = self.get_trasaction_id()
         ping_msg = {"t": t_id, "y": "q", "q": "ping", "a": {"id": self.id}}
         self.sock.sendto(bencode(ping_msg), ip_port)
@@ -383,14 +383,14 @@ class DHT(object):
         #add responder.id to my RoutingTable
         transaction_id = response["t"]
         q = self.queries[transaction_id]
-        logging.info( "<----%s--- PONG\n" % str(q.ip_port) )
+        #logging.info( "<----%s--- PONG\n" % str(q.ip_port) )
         self.routing_table.insert(DHTPeer(response['r']['id'], q.ip_port))
         del self.queries[transaction_id]
 
 
     def got_ping_query(self, query, source_ip_port):
         transaction_id = query["t"]
-        logging.info( "<----~~~--- PING ..%s.. PONG ------------> \n" % str(source_ip_port) )
+        #logging.info( "<----~~~--- PING ..%s.. PONG ------------> \n" % str(source_ip_port) )
         self.routing_table.insert(DHTPeer(query['a']['id'], source_ip_port))
         pong_msg_reply = {"t": transaction_id, "y": "r", "r": {"id": self.id}}
         self.sock.sendto(bencode(pong_msg_reply), source_ip_port)
@@ -414,7 +414,7 @@ class DHT(object):
             self.send_find_node_message(target, n.ip_port)
 
     def send_find_node_message(self, target, ip_port):
-        logging.info( "FIND NODE ----%s--->\n" % str(ip_port) )
+        #logging.info( "FIND NODE ----%s--->\n" % str(ip_port) )
         t_id = self.get_trasaction_id()
         find_node_msg = {"t": t_id, "y": "q", "q": "find_node", "a": {"id": self.id, "target": target}}
         self.sock.sendto(bencode(find_node_msg), ip_port)
@@ -433,7 +433,7 @@ class DHT(object):
         #Not the target
 
     def got_find_node_query(self, query, source_ip_port):
-        logging.info( "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port) )
+        #logging.info( "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port) )
 
         transaction_id = self.get_trasaction_id()
         token = hashlib.sha1(self.generate_token()).digest()
@@ -455,7 +455,7 @@ class DHT(object):
         #print "Got find_node response"
         transaction_id = response["t"]
         target_id = self.get_original_target_id_from_response(response)
-        logging.info( "<----%s--- FIND_NODES \n" % target_id.encode("hex") )
+        #logging.info( "<----%s--- FIND_NODES \n" % target_id.encode("hex") )
 
         if response['r'].has_key('nodes'):
             #print "The response has nodes"
@@ -519,6 +519,7 @@ class DHT(object):
         #Response with closest nodes = {"t":"aa", "y":"r", "r": {"id":"abcdefghij0123456789", "token":"aoeusnth", "nodes": "def456..."}}
     def get_peers(self, info_hash, callback = None):
         if callback:
+            info_hash_hex = info_hash.encode("hex")
             if not self.get_peers_callbacks.has_key(info_hash):
                 self.get_peers_callbacks[info_hash] = []
             self.get_peers_callbacks[info_hash].append(callback)
@@ -535,14 +536,14 @@ class DHT(object):
 
 
     def send_get_peers_message(self, info_hash, ip_port):       
-        logging.info( "GET PEERS ----%s--->\n" % str(ip_port) )
+        #logging.info( "GET PEERS ----%s--->\n" % str(ip_port) )
         trasaction_id = self.get_trasaction_id()
         get_peers_msg = {"t": trasaction_id, "y": "q", "q": "get_peers", "a": {"id": self.id, "info_hash": info_hash}}
         self.sock.sendto(bencode(get_peers_msg), ip_port)
         self.queries[trasaction_id] = DHTQuery(get_peers_msg, ip_port)
 
     def got_get_peers_query(self, query, source_ip_port):
-        logging.info( "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port) )
+        #logging.info( "GET PEERS RESPONSE ----%s--->\n" % str(source_ip_port) )
 
         transaction_id = self.get_trasaction_id()
         token = hashlib.sha1(self.generate_token()).digest()
@@ -575,11 +576,11 @@ class DHT(object):
         #import pdb; pdb.set_trace()
         #print "Got get_peers response"
         target_id = self.get_original_info_hash_from_response(response)
-        logging.info( "<----%s--- GET_PEERS \n" % target_id.encode("hex") )
+        #logging.info( "<----%s--- GET_PEERS \n" % target_id.encode("hex") )
 
         #import pdb; pdb.set_trace()
         if response['r'].has_key('nodes'):
-            logging.info("Got nodes")
+            #logging.info("Got nodes")
             #print "The get_peers response has nodes"
             self.add_nodes_to_heap(response, target_id)
 
@@ -596,7 +597,7 @@ class DHT(object):
             #logging.info( str(self.infohash_peers[self.infohash_peers.keys()[0]].keys()) )
             #import pdb; pdb.set_trace()
             #XXX: Maybe I should announce back even if they dont have a peer list for me?
-            self.announce_peer(target_id, ip_port, response)        
+            #self.announce_peer(target_id, ip_port, response)        
         else:
             logging.info( "Response for find_node has no nodes:\n%s" % str(response) )
 
@@ -622,8 +623,8 @@ class DHT(object):
         for p in new_peers:
             self.infohash_peers[target_id][p] = time.time()     
             
-        for callback in self.get_peers_callbacks:
-            callback(new_peers, self.infohash_peers[target_id])
+        for callback in self.get_peers_callbacks[target_id]:
+            callback(target_id, new_peers, self.infohash_peers[target_id])
         #print "Peer list for hash:%s is:\n%s" % (target_id, str(self.infohash_peers[target_id]))   
 
 
@@ -632,7 +633,7 @@ class DHT(object):
         #Response = {"t":"aa", "y":"r", "r": {"id":"mnopqrstuvwxyz123456"}}
     def announce_peer(self, info_hash, ip_port, response):
         token = response['r']['token']
-        logging.info( "ANNOUNCE_PEER ----%s--->\n" % str(ip_port) )
+        #logging.info( "ANNOUNCE_PEER ----%s--->\n" % str(ip_port) )
         t_id = self.get_trasaction_id()
         announce_peer_msg = {"t": t_id, "y": "q", "q": "announce_peer", "a": {"id": self.id, "info_hash": info_hash, "token": token, "port": self.port}}
         self.sock.sendto(bencode(announce_peer_msg), ip_port)
@@ -647,7 +648,7 @@ class DHT(object):
 
     def got_announce_peer_response(self, response):
         target_id = self.get_original_target_id_from_response(response)
-        logging.info( "<----%s--- ANNOUNCE_PEER \n" % target_id.encode("hex") )
+        #logging.info( "<----%s--- ANNOUNCE_PEER \n" % target_id.encode("hex") )
         transaction_id = response["t"]
         del self.queries[transaction_id]
         
