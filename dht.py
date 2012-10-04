@@ -447,7 +447,7 @@ class DHT(object):
             nodes += cur_node_str
         
         find_node_response_msg = {"t": transaction_id, "y": "r", "r": {"id": self.id, "nodes": nodes}}
-        self.sock.sendto(bencode(find_node_response_msg), ip_port)
+        self.sock.sendto(bencode(find_node_response_msg), source_ip_port)
         #llself.queries[trasaction_id] = DHTQuery(get_peers_response_msg, ip_port)
 
 
@@ -506,12 +506,13 @@ class DHT(object):
             #TODO Check if new node is the one im looking for?!
 
     def iterate_closest_nodes(self, target_id):
-        node_list = self.node_lists[target_id]
-        for n in node_list.get_next_closest_nodes():
-            if not node_list.contacted.has_key(n.id):
-                node_list.contacted[n.id] = True
-                yield n
-                
+        if self.node_lists.has_key(target_id):
+            node_list = self.node_lists[target_id]
+            for n in node_list.get_next_closest_nodes():
+                if not node_list.contacted.has_key(n.id):
+                    node_list.contacted[n.id] = True
+                    yield n
+                    
 
         #~~~~~~~~~~~~~~~~ MESSAGE: get_peers
         #get_peers Query = {"t":"aa", "y":"q", "q":"get_peers", "a": {"id":"abcdefghij0123456789", "info_hash":"mnopqrstuvwxyz123456"}}
@@ -568,7 +569,7 @@ class DHT(object):
             get_peers_response_dict['nodes'] = nodes
 
         get_peers_response_msg = {"t": transaction_id, "y": "r", "r": get_peers_response_dict}
-        self.sock.sendto(bencode(get_peers_response_msg), ip_port)
+        self.sock.sendto(bencode(get_peers_response_msg), source_ip_port)
         #llself.queries[trasaction_id] = DHTQuery(get_peers_response_msg, ip_port)
 
 
